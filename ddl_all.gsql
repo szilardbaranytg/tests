@@ -1,0 +1,45 @@
+DROP ALL
+
+CREATE VERTEX v1 (PRIMARY_ID id INT, name STRING)
+CREATE VERTEX v2 (PRIMARY_ID id INT, name STRING)
+
+CREATE UNDIRECTED EDGE e1 (FROM v1, TO v2)
+
+CREATE GRAPH test (v1, v2, e1)
+
+BEGIN
+CREATE QUERY test1(/* Parameters here */) FOR GRAPH test { 
+
+  start = {v1.*};
+  
+  res =
+      SELECT trg
+      FROM   start:src -(e1:e)- v2:trg;
+  
+  PRINT res;
+}
+END
+
+INSTALL QUERY test1
+
+DROP DATA_SOURCE s3ds2
+
+CREATE DATA_SOURCE S3 s3ds2 = "{\"file.reader.settings.fs.s3a.access.key\":\"AKIA45R5O2UP7B56YK5V\",\"file.reader.settings.fs.s3a.secret.key\":\"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\"}" FOR GRAPH test
+
+DROP JOB s3lj1
+
+BEGIN
+CREATE LOADING JOB s3lj1 FOR GRAPH test {
+
+    DEFINE FILENAME f = "$s3ds2:{\"file.uris\":\"s3://tg-workshop-2020-10-04/newdata.csv\"}";
+
+    LOAD f
+        TO VERTEX v1 VALUES($2, $2)
+      , TO VERTEX v2 VALUES($6, $6)
+      , TO EDGE   e1 VALUES($2, $6)
+        USING SEPARATOR=","
+            , HEADER="true"
+            , EOL="\n";
+}
+END
+
