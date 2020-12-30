@@ -24,7 +24,7 @@ INSTALL QUERY test1
 
 DROP DATA_SOURCE s3ds2
 
-CREATE DATA_SOURCE S3 s3ds2 = "{\"file.reader.settings.fs.s3a.access.key\":\"AKIA45R5O2UP7B56YK5V\",\"file.reader.settings.fs.s3a.secret.key\":\"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\"}" FOR GRAPH test
+CREATE DATA_SOURCE S3 s3ds2 = "{\"file.reader.settings.fs.s3a.access.key\":\"{$ACCESS_KEY}\",\"file.reader.settings.fs.s3a.secret.key\":\"{$SECRET_KEY}\"}" FOR GRAPH test
 
 DROP JOB s3lj1
 
