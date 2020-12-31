@@ -1,0 +1,421 @@
+SET exit_on_error = FALSE
+DROP ALL
+
+// =========================================================================
+// Vertex types
+
+CREATE VERTEX City(PRIMARY_ID city_id STRING, city STRING, elementary_school_count UINT, kindergarten_count UINT, university_count UINT, academy_ratio DOUBLE, elderly_population_ratio DOUBLE, elderly_alone_ratio DOUBLE, nursing_home_count UINT) WITH STATS="OUTDEGREE_BY_EDGETYPE", PRIMARY_ID_AS_ATTRIBUTE="false"
+
+CREATE VERTEX Province(PRIMARY_ID province_id STRING, province STRING, population UINT, area FLOAT) WITH STATS="OUTDEGREE_BY_EDGETYPE", PRIMARY_ID_AS_ATTRIBUTE="false"
+
+CREATE VERTEX Country(PRIMARY_ID id STRING, country STRING) WITH STATS="OUTDEGREE_BY_EDGETYPE", PRIMARY_ID_AS_ATTRIBUTE="false"
+
+CREATE VERTEX SearchStat(PRIMARY_ID id STRING, cold FLOAT, flu FLOAT, pneumonia FLOAT, coronavirus FLOAT) WITH STATS="OUTDEGREE_BY_EDGETYPE", PRIMARY_ID_AS_ATTRIBUTE="false"
+
+CREATE VERTEX WeatherStat(PRIMARY_ID id STRING, code UINT, avg_temp DOUBLE, min_temp DOUBLE, max_temp DOUBLE, precipitation DOUBLE, max_wind_speed DOUBLE, most_wind_direction DOUBLE, avg_relative_humidity DOUBLE) WITH STATS="OUTDEGREE_BY_EDGETYPE", PRIMARY_ID_AS_ATTRIBUTE="false"
+
+CREATE VERTEX InfectionCase(PRIMARY_ID id STRING, infection_case STRING, confirmed UINT, ic_group BOOL) WITH STATS="OUTDEGREE_BY_EDGETYPE", PRIMARY_ID_AS_ATTRIBUTE="true"
+
+CREATE VERTEX Year_(PRIMARY_ID id STRING, year_ INT) WITH STATS="OUTDEGREE_BY_EDGETYPE", PRIMARY_ID_AS_ATTRIBUTE="false"
+
+CREATE VERTEX Month_(PRIMARY_ID id STRING, month_ INT) WITH STATS="OUTDEGREE_BY_EDGETYPE", PRIMARY_ID_AS_ATTRIBUTE="false"
+
+CREATE VERTEX Day_(PRIMARY_ID id STRING, day_ INT) WITH STATS="OUTDEGREE_BY_EDGETYPE", PRIMARY_ID_AS_ATTRIBUTE="false"
+
+CREATE VERTEX TravelEvent(PRIMARY_ID id STRING, latitude FLOAT, longitude FLOAT, visited_date DATETIME, travel_type STRING) WITH STATS="OUTDEGREE_BY_EDGETYPE", PRIMARY_ID_AS_ATTRIBUTE="false"
+
+CREATE VERTEX Patient(PRIMARY_ID patient_id STRING, global_num UINT, birth_year UINT, infection_case STRING, contact_number UINT, symptom_onset_date DATETIME, confirmed_date DATETIME, released_date DATETIME, deceased_date DATETIME, state STRING, disease STRING, sex STRING COMPRESS) WITH STATS="OUTDEGREE_BY_EDGETYPE", PRIMARY_ID_AS_ATTRIBUTE="true"
+
+// =========================================================================
+// Edge types
+
+CREATE UNDIRECTED EDGE PROVINCE_IN_COUNTRY(FROM Country, TO Province)
+
+CREATE UNDIRECTED EDGE CITY_IN_PROVINCE(FROM City, TO Province)
+
+CREATE UNDIRECTED EDGE WEATHER_CONDITION(FROM Province, TO WeatherStat, wc_date DATETIME)
+
+CREATE UNDIRECTED EDGE CASE_IN_CITY(FROM InfectionCase, TO City, latitude FLOAT, longitude FLOAT)
+
+CREATE UNDIRECTED EDGE CASE_IN_PROVINCE(FROM InfectionCase, TO Province)
+
+CREATE UNDIRECTED EDGE YEAR_MONTH(FROM Year_, TO Month_)
+
+CREATE UNDIRECTED EDGE MONTH_DAY(FROM Month_, TO Day_)
+
+CREATE UNDIRECTED EDGE SEARCH_STAMP(FROM Day_, TO SearchStat)
+
+CREATE UNDIRECTED EDGE WEATHER_STAMP(FROM Day_, TO WeatherStat)
+
+CREATE UNDIRECTED EDGE TRAVEL_EVENT_IN(FROM TravelEvent, TO City)
+
+CREATE UNDIRECTED EDGE TRAVEL_STAMP(FROM Day_, TO TravelEvent)
+
+CREATE DIRECTED EDGE INFECTED_BY(FROM Patient, TO Patient) WITH REVERSE_EDGE="reverse_INFECTED_BY"
+
+CREATE UNDIRECTED EDGE BELONGS_TO_CASE(FROM Patient, TO InfectionCase)
+
+CREATE UNDIRECTED EDGE CONFIRM_STAMP(FROM Day_, TO Patient)
+
+CREATE UNDIRECTED EDGE SYMPTOM_STAMP(FROM Day_, TO Patient)
+
+CREATE UNDIRECTED EDGE RELEASED_STAMP(FROM Day_, TO Patient)
+
+CREATE UNDIRECTED EDGE BIRTH_STAMP(FROM Year_, TO Patient)
+
+CREATE UNDIRECTED EDGE DECEASE_STAMP(FROM Day_, TO Patient)
+
+CREATE UNDIRECTED EDGE PATIENT_FROM_CITY(FROM Patient, TO City)
+
+CREATE UNDIRECTED EDGE PATIENT_FROM_PROVINCE(FROM Patient, TO Province)
+
+CREATE UNDIRECTED EDGE PATIENT_FROM_COUNTRY(FROM Patient, TO Country)
+
+CREATE UNDIRECTED EDGE PATIENT_TRAVELED(FROM Patient, TO TravelEvent)
+
+// =========================================================================
+// Graph
+
+CREATE GRAPH MyGraph(City, Province, Country, SearchStat, WeatherStat, InfectionCase, Year_, Month_, Day_, TravelEvent, Patient, PROVINCE_IN_COUNTRY, CITY_IN_PROVINCE, WEATHER_CONDITION, CASE_IN_CITY, CASE_IN_PROVINCE, YEAR_MONTH, MONTH_DAY, SEARCH_STAMP, WEATHER_STAMP, TRAVEL_EVENT_IN, TRAVEL_STAMP, INFECTED_BY, reverse_INFECTED_BY, BELONGS_TO_CASE, CONFIRM_STAMP, SYMPTOM_STAMP, RELEASED_STAMP, BIRTH_STAMP, DECEASE_STAMP, PATIENT_FROM_CITY, PATIENT_FROM_PROVINCE, PATIENT_FROM_COUNTRY, PATIENT_TRAVELED)
+
+// =========================================================================
+// Data sources
+
+DROP DATA_SOURCE s3ds
+
+CREATE DATA_SOURCE S3 s3ds = "{\"file.reader.settings.fs.s3a.access.key\":\"{$ACCESS_KEY}\",\"file.reader.settings.fs.s3a.secret.key\":\"{$SECRET_KEY}\"}" FOR GRAPH test
+
+
+// =========================================================================
+// Loading jobs
+
+BEGIN
+CREATE LOADING JOB load_Case FOR GRAPH MyGraph {
+
+  DEFINE FILENAME MyDataSource = "$s3ds:{\"file.uris\":\"s3://tg-workshop-2020-10-04/covid19/Case.csv\"}";
+
+  LOAD MyDataSource TO VERTEX InfectionCase          VALUES($4, $4, $5, $3)                                        USING SEPARATOR=",", HEADER="true", EOL="\n";
+
+  LOAD MyDataSource TO EDGE   CASE_IN_CITY           VALUES($4, $2, $6, $7)                                        USING SEPARATOR=",", HEADER="true", EOL="\n";
+  LOAD MyDataSource TO EDGE   CASE_IN_PROVINCE       VALUES($4, $1)                                                USING SEPARATOR=",", HEADER="true", EOL="\n";
+
+}
+END
+
+// -------------------------------------------------------------------------
+
+BEGIN
+CREATE LOADING JOB load_PatientInfo FOR GRAPH MyGraph {
+
+  DEFINE FILENAME MyDataSource = "$s3ds:{\"file.uris\":\"s3://tg-workshop-2020-10-04/covid19/PatientInfo.csv\"}";
+
+  LOAD MyDataSource TO VERTEX Patient                VALUES($0, $1, $3, $9, $12, $13, $14, $15, $16, $17, $8, $2)  USING SEPARATOR=",", HEADER="true", EOL="\n";
+
+  LOAD MyDataSource TO EDGE   BELONGS_TO_CASE        VALUES($0, $9)                                                USING SEPARATOR=",", HEADER="true", EOL="\n";
+  LOAD MyDataSource TO EDGE   INFECTED_BY            VALUES($0, $11)                                               USING SEPARATOR=",", HEADER="true", EOL="\n";
+  LOAD MyDataSource TO EDGE   BIRTH_STAMP            VALUES($3, $0)                                                USING SEPARATOR=",", HEADER="true", EOL="\n";
+  LOAD MyDataSource TO EDGE   PATIENT_FROM_CITY      VALUES($0, $7)                                                USING SEPARATOR=",", HEADER="true", EOL="\n";
+  LOAD MyDataSource TO EDGE   PATIENT_FROM_PROVINCE  VALUES($0, $6)                                                USING SEPARATOR=",", HEADER="true", EOL="\n";
+  LOAD MyDataSource TO EDGE   PATIENT_FROM_COUNTRY   VALUES($0, $5)                                                USING SEPARATOR=",", HEADER="true", EOL="\n";
+  LOAD MyDataSource TO EDGE   CITY_IN_PROVINCE       VALUES($7, $6)                                                USING SEPARATOR=",", HEADER="true", EOL="\n";
+  LOAD MyDataSource TO EDGE   PROVINCE_IN_COUNTRY    VALUES($5, $6)                                                USING SEPARATOR=",", HEADER="true", EOL="\n";
+
+}
+END
+
+// -------------------------------------------------------------------------
+
+BEGIN
+CREATE LOADING JOB load_PatientRoute FOR GRAPH MyGraph {
+
+  DEFINE FILENAME MyDataSource = "$s3ds:{\"file.uris\":\"s3://tg-workshop-2020-10-04/covid19/PatientRoute.csv\"}";
+
+  LOAD MyDataSource TO VERTEX TravelEvent            VALUES(gsql_concat($2,$6,$7), $6, $7, $2, $5)                 USING SEPARATOR=",", HEADER="true", EOL="\n";
+
+  LOAD MyDataSource TO EDGE PATIENT_TRAVELED         VALUES($0, gsql_concat($2,$6,$7))                             USING SEPARATOR=",", HEADER="true", EOL="\n";
+  LOAD MyDataSource TO EDGE TRAVEL_EVENT_IN          VALUES(gsql_concat($2,$6,$7), $4)                             USING SEPARATOR=",", HEADER="true", EOL="\n";
+
+}
+END
+
+// -------------------------------------------------------------------------
+
+BEGIN
+CREATE LOADING JOB load_Population FOR GRAPH MyGraph {
+
+  DEFINE FILENAME MyDataSource = "$s3ds:{\"file.uris\":\"s3://tg-workshop-2020-10-04/covid19/Population.csv\"}";
+
+  LOAD MyDataSource TO VERTEX Province               VALUES($0, _, $1, $2)                                         USING SEPARATOR=",", HEADER="true", EOL="\n";
+
+}
+END
+
+// -------------------------------------------------------------------------
+
+BEGIN
+CREATE LOADING JOB load_SearchTrend FOR GRAPH MyGraph {
+
+  DEFINE FILENAME MyDataSource = "$s3ds:{\"file.uris\":\"s3://tg-workshop-2020-10-04/covid19/SearchTrend.csv\"}";
+
+  LOAD MyDataSource TO VERTEX SearchStat             VALUES($0, $1, $2, $3, $4)                                    USING SEPARATOR=",", HEADER="true", EOL="\n";
+
+}
+END
+
+// -------------------------------------------------------------------------
+
+BEGIN
+CREATE LOADING JOB load_Weather FOR GRAPH MyGraph {
+
+  DEFINE FILENAME MyDataSource = "$s3ds:{\"file.uris\":\"s3://tg-workshop-2020-10-04/covid19/Weather.csv\"}";
+
+  LOAD MyDataSource TO VERTEX WeatherStat            VALUES(gsql_concat($0,$2), $0, $3, $4, $5, $6, $7, $8, $9)    USING SEPARATOR=",", HEADER="true", EOL="\n";
+
+  LOAD MyDataSource TO EDGE WEATHER_CONDITION        VALUES($1, gsql_concat($0,$2), $2)                            USING SEPARATOR=",", HEADER="true", EOL="\n";
+
+}
+END
+
+
+RUN LOADING JOB load_Case         USING EOF="true"
+RUN LOADING JOB load_PatientInfo  USING EOF="true"
+RUN LOADING JOB load_PatientRoute USING EOF="true"
+RUN LOADING JOB load_Population   USING EOF="true"
+RUN LOADING JOB load_SearchTrend  USING EOF="true"
+RUN LOADING JOB load_Weather      USING EOF="true"
+
+// =========================================================================
+// Queries
+
+BEGIN
+CREATE QUERY ageDistribution() FOR GRAPH MyGraph { 
+	/**********************************************************
+	 * This query returns the distribution of the number of 
+	 * recorded deceased patients per age year. 
+	 * 
+	 * There may be some discrepancies in the data which would
+	 * explain some weird occurrences.
+   *********************************************************/
+  MapAccum<int, int> @@ageMap;
+	Start = {Patient.*};
+	
+	Start = select s from Start:s
+	        where s.state != "deceased"
+	        accum @@ageMap += ((year(now()) - s.birth_year) -> 1);
+	
+	print @@ageMap;
+}
+END
+
+// -------------------------------------------------------------------------
+
+BEGIN
+CREATE QUERY allConnection(VERTEX<Patient> p) FOR GRAPH MyGraph { 
+  /******************************************
+	* Grabing all connections of a specified Patient
+	******************************************/
+  ListAccum<EDGE> @@edgeList;
+	seed = {p};
+	
+	S1 = SELECT s
+	       FROM seed:s -(:e)->:t
+	       ACCUM @@edgeList += e;
+	
+  PRINT  @@edgeList; 
+}
+END
+
+// -------------------------------------------------------------------------
+
+BEGIN
+CREATE QUERY edgeCrawl()FOR GRAPH MyGraph { 
+  /**************************************
+	* S1 = Grabbing all Patients that a Patient Infected
+	* S2 = Grabbing all Patients belonging to a well known Case
+	* S3 = Grabbing all Patients that were at the same place at the same time
+	* 
+	* Return all EDGEs
+	***************************************/
+	ListAccum<EDGE> @@edgeList;
+	seed = {Patient.*};
+	
+	S1 = SELECT s
+	       FROM seed:s -(INFECTED_BY:e)-> :t
+	       ACCUM @@edgeList += e;
+	
+	S2 = SELECT s
+	         FROM seed:s -(BELONGS_TO_CASE:e)- :t
+	         WHERE t.id NOT IN ("etc", "contact with patient", "overseas inflow")
+	         ACCUM @@edgeList += e;
+	
+	S3 = SELECT s
+	         FROM seed:s -(PATIENT_TRAVELED:e)- :t
+	         WHERE t.outdegree("PATIENT_TRAVELED") > 1
+	         ACCUM @@edgeList += e;
+	
+  PRINT  @@edgeList; 
+}
+END
+
+// -------------------------------------------------------------------------
+
+BEGIN
+CREATE QUERY infectionSubgraph(vertex<Patient> p) FOR GRAPH MyGraph { 
+	/**********************************************************
+	 * This query takes a single patient and finds all all infections and potential infections. 
+	 * Potential infections are determined by who came into contact with this person 
+	 * (directly or indirectly) within the symptom onset to release date time frame.
+	 * 
+	 * Sample Parameter: patient 4100000006
+   *********************************************************/
+	
+  DATETIME STARTTIME, ENDTIME;
+	OrAccum @visited;
+	SetAccum<EDGE> @@edgeSet;
+  STARTTIME = p.symptom_onset_date;
+	ENDTIME = p.released_date;
+	
+	Infected (ANY) = {p};
+	Infected = select s from Infected:s
+	           accum s.@visited = true;
+	
+	while Infected.size() > 0 limit 100 do
+	  Places = select t from Infected:s-(PATIENT_TRAVELED:e)-TravelEvent:t
+	           where (t.visited_date >= STARTTIME and 
+							      t.visited_date <= ENDTIME and 
+							      t.outdegree("PATIENT_TRAVELED") > 1)
+	             and t.@visited == false
+	           accum t.@visited = true,
+	                 @@edgeSet += e; 
+	
+	  SamePlace = select t from Places:s-(PATIENT_TRAVELED:e)-Patient:t
+	              where t.@visited == false 
+	              accum t.@visited = true,
+	                    @@edgeSet += e; 
+	
+	  People = select t from Infected:s-(reverse_INFECTED_BY:e)-:t
+	           where (STARTTIME <= t.symptom_onset_date and ENDTIME >= t.symptom_onset_date)
+	             and t.@visited == false
+	           accum t.@visited = true,
+	                 @@edgeSet += e;
+	
+	  Infected = SamePlace UNION People;
+	end;
+	
+	print @@edgeSet;
+}
+END
+
+// -------------------------------------------------------------------------
+
+BEGIN
+CREATE QUERY listPatients_Infected_By(VERTEX<Patient> p) FOR GRAPH MyGraph { 
+  /*****************************************************
+	* Who are patient patients infected by _____ patient?
+	* Sample: 2000000205
+	******************************************************/
+  
+	ListAccum<STRING> @@ids;
+
+	seed = {p};
+	
+	one_hop =  SELECT tgt FROM seed:v -(reverse_INFECTED_BY:e)->:tgt
+	          ACCUM @@ids += tgt.patient_id;
+	
+  PRINT @@ids AS Infected_Patients;
+}
+END
+
+// -------------------------------------------------------------------------
+
+BEGIN
+CREATE QUERY mostDirectInfections() FOR GRAPH MyGraph {
+	/************************************************* 
+	* Which person infected the most people directly?
+	**************************************************/
+	
+	SumAccum<int> @directInfections;
+
+	Start (ANY) = {Patient.*};
+	
+	//while Start.size() > 0 do
+	  Start = select s from Start:s-(reverse_INFECTED_BY:e)-Patient:t
+	          accum s.@directInfections += 1
+	          order by s.outdegree("reverse_INFECTED_BY") desc
+	          limit 1;
+	
+	print Start as Answer;
+}
+END
+
+// -------------------------------------------------------------------------
+
+BEGIN
+CREATE DISTRIBUTED QUERY pageRank (FLOAT maxChange, INT maxIter, FLOAT damping, BOOL display, INT outputLimit) FOR GRAPH MyGraph{
+# Compute the pageRank score for each vertex in the GRAPH
+# In each iteration, compute a score for each vertex:
+#   score = (1-damping) + damping*sum(received scores FROM its neighbors).
+# The pageRank algorithm stops when either of the following is true:
+#  a) it reaches maxIter iterations;
+#  b) the max score change for any vertex compared to the last iteration <= maxChange.
+
+        TYPEDEF TUPLE<vertex Vertex_ID, FLOAT score> vertexScore;
+        HeapAccum<vertexScore>(outputLimit, score DESC) @@topScores;
+        MaxAccum<float> @@maxDiff = 9999; # max score change in an iteration
+        SumAccum<float> @received_score = 0; # sum of scores each vertex receives FROM neighbors
+        SumAccum<float> @score = 1;   # Initial score for every vertex is 1.
+        SetAccum<EDGE> @@edgeSet;                   # list of all edges, if display is needed
+
+        Start = {Patient.*};   #  Start with all vertices of specified type(s)
+        WHILE @@maxDiff > maxChange LIMIT maxIter DO
+                @@maxDiff = 0;
+                V = SELECT s
+                    FROM Start:s -(INFECTED_BY:e)-> :t
+                    ACCUM t.@received_score += s.@score/(s.outdegree("INFECTED_BY")) 
+                    POST-ACCUM s.@score = (1.0-damping) + damping * s.@received_score,
+                               s.@received_score = 0,
+                               @@maxDiff += abs(s.@score - s.@score');
+        END; # END WHILE loop
+
+
+        IF outputLimit > 0 THEN
+                V = SELECT s FROM Start:s
+                    POST-ACCUM @@topScores += vertexScore(s, s.@score);
+                PRINT @@topScores;
+        END;
+
+
+        IF display THEN
+                PRINT Start[Start.@score];
+                Start = SELECT s
+                        FROM Start:s -(INFECTED_BY:e)-> :t
+                        ACCUM @@edgeSet += e;
+                PRINT @@edgeSet;
+        END;
+}
+END
+
+// -------------------------------------------------------------------------
+
+BEGIN
+CREATE QUERY useMap(/* Parameters here */) FOR GRAPH MyGraph SYNTAX v2{
+	/***************************************
+	* Grab a Unique Count of those Patinets 
+  * located in South Korean Cities
+	***************************************/
+  MapAccum<STRING, SetAccum<STRING>> @@patientsByCityMap;
+	//OrAccum @visted;
+  C1 = {City.*};
+	S1 = SELECT v1 FROM C1:v1-(TRAVEL_EVENT_IN:e1)-TravelEvent:v2-(PATIENT_TRAVELED:e2)-Patient:v3
+	               //WHERE v3.@visted == false
+	               ACCUM @@patientsByCityMap += (v1.city -> v3.patient_id);
+	               //POST-ACCUM v3.@visted = true;
+
+  PRINT @@patientsByCityMap As Patient_Count_In_City; 
+}
+END
+
+INSTALL QUERY ALL
+
+// EOF
+
